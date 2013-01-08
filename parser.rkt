@@ -4,7 +4,7 @@
 
 (provide parse emit)
 
-;; Proper error handling.
+;; TODO: Proper error handling.
 
 ;; Ripped from the original whitespace VM's parser definitions. We first map
 ;; the three meaningful symbols (space, tab, linefeed) to the symbols A,B,C:
@@ -14,7 +14,7 @@
 (define C #\linefeed)
 
 ;; Then define some magical macros which generate the parse rules necessary
-;; for parse and emit.
+;; for parse and emit. They are defined below.
 
 ;; parse :: any/c * input-port -> [WS-Expr]
 ;;
@@ -24,7 +24,7 @@
   (define (recursive accum)
     (cond
       [(eof-object? (peek-char input-port)) (reverse accum)]
-      [(ignorable-char? input-port) (read-char input-port) (parse source-name input-port)]
+      [(ignorable-char? input-port) (read-char input-port) (recursive accum)]
       [else (let ([expr (ormap (λ (fn) (fn input-port)) parse-functions)])
               (if expr
                   (recursive (cons expr accum))
