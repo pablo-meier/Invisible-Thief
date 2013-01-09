@@ -1,5 +1,5 @@
-  	 	
-  	 	
-	   
-
-
+(push 5) 	 	
+(push 5) 	 	
+(infix	add)   
+(output-int)
+(end)
