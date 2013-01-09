@@ -8,7 +8,10 @@
          [filename (vector-ref args 0)])
     (call-with-input-file filename
       (λ (file-input)
-        (interp-program (parse #f file-input)))
+        (let ([prog (parse #f file-input)])
+          (if prog
+              (interp-program prog)
+              (void))))
       #:mode 'binary)))
 
 (main)

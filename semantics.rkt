@@ -8,6 +8,7 @@
 ;;
 ;; Remove ugly continuation hack for 'end'
 ;; clean up interp-program to use eval.
+;; Profile?
 
 (define namespace (current-namespace))
 
@@ -34,27 +35,27 @@
            (inc-instruction rslt)))]))
 
 
-;                                                                                            
-;                                                                                            
-;                                                                                            
-;                                                                                            
-;                                                            ;                               
-;                                                  ;;        ;                               
-;                                                  ;                                         
-;     ;;;    ;  ;;      ;;;     ;  ;;     ;;;    ;;;;;;    ;;;       ;;;    ;; ;;      ;;;   
-;    ;  ;;   ;;;  ;    ;   ;    ;;;  ;   ;   ;     ;         ;      ;  ;;   ;;;  ;    ;   ;  
-;   ;    ;;  ;    ;;  ;    ;;   ;;           ;;    ;         ;     ;    ;;  ;;   ;    ;      
-;   ;     ;  ;     ;  ;;;;;;;   ;            ;;    ;         ;     ;     ;  ;;   ;    ;;;    
-;   ;     ;  ;     ;  ;         ;        ;;;;;;    ;         ;     ;     ;  ;;   ;      ;;;  
-;   ;     ;  ;     ;  ;         ;       ;    ;;    ;         ;     ;     ;  ;;   ;        ;; 
-;    ;   ;   ;;   ;    ;   ;    ;       ;    ;;    ;;        ;      ;   ;   ;;   ;   ;;   ;  
-;     ;;;    ; ;;;      ;;;;    ;        ;;;;;;     ;;;    ;;;;;     ;;;    ;;   ;    ;;;;   
-;            ;                                                                               
-;            ;                                                                               
-;            ;                                                                               
+;
+;
+;
+;
+;                                                            ;
+;                                                  ;;        ;
+;                                                  ;
+;     ;;;    ;  ;;      ;;;     ;  ;;     ;;;    ;;;;;;    ;;;       ;;;    ;; ;;      ;;;
+;    ;  ;;   ;;;  ;    ;   ;    ;;;  ;   ;   ;     ;         ;      ;  ;;   ;;;  ;    ;   ;
+;   ;    ;;  ;    ;;  ;    ;;   ;;           ;;    ;         ;     ;    ;;  ;;   ;    ;
+;   ;     ;  ;     ;  ;;;;;;;   ;            ;;    ;         ;     ;     ;  ;;   ;    ;;;
+;   ;     ;  ;     ;  ;         ;        ;;;;;;    ;         ;     ;     ;  ;;   ;      ;;;
+;   ;     ;  ;     ;  ;         ;       ;    ;;    ;         ;     ;     ;  ;;   ;        ;;
+;    ;   ;   ;;   ;    ;   ;    ;       ;    ;;    ;;        ;      ;   ;   ;;   ;   ;;   ;
+;     ;;;    ; ;;;      ;;;;    ;        ;;;;;;     ;;;    ;;;;;     ;;;    ;;   ;    ;;;;
+;            ;
+;            ;
+;            ;
 
 
-(define-whitespace-operation (push i) 
+(define-whitespace-operation (push i)
   (prog vstack cstack mem pc)
   (state prog (cons i vstack) cstack mem pc))
 
@@ -62,11 +63,11 @@
   (prog vstack cstack mem pc)
   (state prog (cons (car vstack) vstack) cstack mem pc))
 
-(define-whitespace-operation (ref i) 
+(define-whitespace-operation (ref i)
   (prog vstack cstack mem pc)
   (state prog (cons (list-ref vstack i) vstack) cstack mem pc))
 
-(define-whitespace-operation (slide i) 
+(define-whitespace-operation (slide i)
   (prog (list fst rst ...) cstack mem pc)
   (state prog (cons fst (drop rst i)) cstack mem pc))
 
@@ -74,7 +75,7 @@
   (prog (list fst snd rst ...) cstack mem pc)
   (state prog `(,snd ,fst . ,rst) cstack mem pc))
 
-(define-whitespace-operation (discard) 
+(define-whitespace-operation (discard)
   (prog vstack cstack mem pc)
   (state prog (cdr vstack) cstack mem pc))
 
@@ -98,7 +99,7 @@
   (prog (list fst rst ...) cstack mem pc)
   (printf "~a" (integer->char fst))
   (state prog rst cstack mem pc))
-  
+
 (define-whitespace-operation (read-int)
   (prog (list loc rst ...) cstack mem pc)
   (let ([datum (read)])
@@ -110,7 +111,7 @@
   (state prog rst cstack mem pc))
 
 (define-whitespace-operation (label l)
-  (prog vstack cstack mem pc) 
+  (prog vstack cstack mem pc)
   (state prog vstack cstack mem pc)) ;; don't manipulate the stack, just increment pc
 
 (define-whitespace-operation (call l)
@@ -151,24 +152,24 @@
   (let ([value (retrieve-from-heap heap value)])
     (state prog (cons value rst) cstack heap pc)))
 
-;                                                                 
-;                                                                 
-;                                                                 
-;                                                                 
-;   ;;                 ;;;                                        
-;   ;;                   ;                                        
-;   ;;                   ;                                        
-;   ;; ;;      ;;;       ;     ;  ;;      ;;;     ;  ;;     ;;;   
-;   ;;;  ;    ;   ;      ;     ;;;  ;    ;   ;    ;;;  ;   ;   ;  
-;   ;;   ;   ;    ;;     ;     ;    ;;  ;    ;;   ;;       ;      
-;   ;;   ;;  ;;;;;;;     ;     ;     ;  ;;;;;;;   ;        ;;;    
-;   ;;   ;;  ;           ;     ;     ;  ;         ;          ;;;  
-;   ;;   ;;  ;           ;     ;     ;  ;         ;            ;; 
-;   ;;   ;;   ;   ;      ;     ;;   ;    ;   ;    ;       ;;   ;  
-;   ;;   ;;    ;;;;   ;;;;;;   ; ;;;      ;;;;    ;        ;;;;   
-;                              ;                                  
-;                              ;                                  
-;                              ;                                  
+;
+;
+;
+;
+;   ;;                 ;;;
+;   ;;                   ;
+;   ;;                   ;
+;   ;; ;;      ;;;       ;     ;  ;;      ;;;     ;  ;;     ;;;
+;   ;;;  ;    ;   ;      ;     ;;;  ;    ;   ;    ;;;  ;   ;   ;
+;   ;;   ;   ;    ;;     ;     ;    ;;  ;    ;;   ;;       ;
+;   ;;   ;;  ;;;;;;;     ;     ;     ;  ;;;;;;;   ;        ;;;
+;   ;;   ;;  ;           ;     ;     ;  ;         ;          ;;;
+;   ;;   ;;  ;           ;     ;     ;  ;         ;            ;;
+;   ;;   ;;   ;   ;      ;     ;;   ;    ;   ;    ;       ;;   ;
+;   ;;   ;;    ;;;;   ;;;;;;   ; ;;;      ;;;;    ;        ;;;;
+;                              ;
+;                              ;
+;                              ;
 
 (define (find-label a-program label)
   (letrec ([recur (λ (prog lbl accum)
@@ -196,24 +197,24 @@
 (define (retrieve-from-heap a-heap loc)
   (list-ref a-heap loc))
 
-;                                               
-;                                               
-;                                               
-;                                               
-;                                               
-;     ;;                         ;;             
-;     ;                          ;              
-;   ;;;;;;     ;;;      ;;;    ;;;;;;     ;;;   
-;     ;       ;   ;    ;   ;     ;       ;   ;  
-;     ;      ;    ;;   ;         ;       ;      
-;     ;      ;;;;;;;   ;;;       ;       ;;;    
-;     ;      ;           ;;;     ;         ;;;  
-;     ;      ;             ;;    ;           ;; 
-;     ;;      ;   ;   ;;   ;     ;;     ;;   ;  
-;      ;;;     ;;;;    ;;;;       ;;;    ;;;;   
-;                                               
-;                                               
-;                                               
+;
+;
+;
+;
+;
+;     ;;                         ;;
+;     ;                          ;
+;   ;;;;;;     ;;;      ;;;    ;;;;;;     ;;;
+;     ;       ;   ;    ;   ;     ;       ;   ;
+;     ;      ;    ;;   ;         ;       ;
+;     ;      ;;;;;;;   ;;;       ;       ;;;
+;     ;      ;           ;;;     ;         ;;;
+;     ;      ;             ;;    ;           ;;
+;     ;;      ;   ;   ;;   ;     ;;     ;;   ;
+;      ;;;     ;;;;    ;;;;       ;;;    ;;;;
+;
+;
+;
 
 ;; Takes a list of commands, and executes them
 ;; one by one, using the input of the last as the
@@ -244,7 +245,7 @@
                                         ['ws-if ws-if]
                                         ['end end]))])
     (letrec ([do-instr (λ (a-state)
-                         (let* ([instr (match a-state 
+                         (let* ([instr (match a-state
                                          [(state prog vstack _ _ pc)
                                           (list-ref prog pc)])]
                                 [fun (get-fun-from-instr (car instr))]
@@ -254,7 +255,7 @@
                                     (set! global-escape! k)
                                     (let ([starting (new-state-with-program list-of-commands)])
                                       (letrec ([recur (λ (new-state)
-                                                        (if (>= (state-program-counter new-state) 
+                                                        (if (>= (state-program-counter new-state)
                                                                (length (state-program new-state)))
                                                             new-state
                                                             (recur (do-instr new-state))))])
@@ -269,7 +270,7 @@
 
 ;; Stack and arithmetic - push, dup, swap, discard, infix, ref, slide
 
-(math-check 
+(math-check
  "push, plus, discard"   ;; vstack -> '()
  '((push 14)             ;;            (14)
    (push 11)             ;;            (11 14)
@@ -350,7 +351,7 @@
    (label sub-7)        ;;            Never called, included to ensure its presence doesn't disturb other labels.
    (push 7)             ;;            (7 ...)
    (infix minus)        ;;            Not being able to write this value is where stack languages get their POWAAAAAA
-   (end)                ;;            
+   (end)                ;;
    (label push-10)      ;;
    (push 15)            ;;            (15 ...)
    (push 5)             ;;            (5 15 ...)
@@ -438,7 +439,7 @@
    (push 10)
    (retrieve)
    (infix plus)) 214)
- 
+
 ;; output-char
 (define (check-output prog expected msg)
   (let ([output (with-output-to-string
@@ -457,7 +458,7 @@
    (push ,(char->integer #\l))
    (push ,(char->integer #\l))
    (push ,(char->integer #\e))
-   (push ,(char->integer #\h))                  
+   (push ,(char->integer #\h))
    (output-char)
    (output-char)
    (output-char)
