@@ -11,7 +11,8 @@
         (let ([prog (parse #f file-input)])
           (if prog
               (interp-program prog)
-              (void))))
-      #:mode 'binary)))
+              #f)))
+      #:mode 'binary)
+    (void)))
 
 (main)

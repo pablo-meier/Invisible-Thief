@@ -4,7 +4,7 @@
 
 (provide parse emit)
 
-;; TODO: 'ignorable-char?' bug.
+;; TODO: Better error handling (TESTS)
 ;; TODO: 'emit' function
 
 ;; Ripped from the original whitespace VM's parser definitions. We first map
@@ -221,7 +221,9 @@
                     (case (read-char input-port)
                       [(#\linefeed) (reverse accum)]
                       [(#\space) (recur (cons 0 accum))]
-                      [(#\tab) (recur (cons 1 accum))]))])
+                      [(#\tab) (recur (cons 1 accum))]
+                      ;; It's an ignorable char, we don't care
+                      [else (recur accum)]))])
     (recur '())))
 
 ;; handle-suffix : Suffix * Input-Port -> WsExpr
@@ -387,3 +389,14 @@
  "ignorable chars"
  (#\p #\a #\b C #\l C #\o C)
  '((end)))
+
+(parse-test
+ "ignorable chars"
+ (#\p #\a #\b A #\l A #\o B A B #\9 C 
+  A A B #\l #\a #\u A B #\r #\e #\n C
+  #\j #\u #\l #\y B #\6 #\t #\h A A A
+  C C #\l #\o #\l C)
+ '((push 5)
+   (push 5)
+   (infix plus)
+   (end)))
