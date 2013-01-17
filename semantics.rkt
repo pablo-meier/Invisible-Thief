@@ -1,36 +1,110 @@
 #lang racket
 
 (require rackunit)
-
 (provide interp-program)
 
-;; TODO
-;;
-;; Remove ugly continuation hack for 'end'
-;; clean up interp-program to use eval.
-;; Profile?
 
-(define-struct state (program value-stack call-stack memory program-counter))
+;
+;
+;
+;
+;   ;     ;  ;     ;
+;   ;     ;  ;     ;
+;   ;;   ;;  ;;   ;;
+;    ;   ;   ;;  ;;;
+;    ;   ;   ; ; ; ;
+;    ;; ;;   ; ;;  ;
+;     ; ;    ;  ;  ;
+;     ; ;    ;     ;
+;     ;;;    ;     ;
+;      ;     ;     ;
+;      ;     ;     ;
+;
+;
+;
 
-(define (new-state)
-  (make-state '() '() '() '() 0))
+;; Represents a Whitespace VM
+(define-struct state (program value-stack call-stack memory program-counter escape))
 
-(define (new-state-with-program prog)
-  (make-state prog '() '() '() 0))
-
-(define (inc-instruction a-state)
-  (match a-state
-    [(state p v c m pc)
-     (state p v c m (add1 pc))]))
-
-(define-syntax (define-whitespace-operation stx)
+;; Parameter representing the state the operations mutate.
+(define-syntax (define-whitespace-operations stx)
   (syntax-case stx ()
-    [(_ (name-of-op params ...) (id ...) body ...)
-     #'(define (name-of-op params ... a-state)
-         (let ([rslt (match a-state
-                       [(struct state (id ...))
-                        body ...])])
-           (inc-instruction rslt)))]))
+    [(_ (destructure ...)
+        [(id1 id2 ...)
+         body1 ...]
+        [(id3 id4 ...)
+         body2 ...] ...)
+     #'(begin
+         (set! operations
+               (cons (λ (current-state expr)
+                       (match expr
+                         [(list 'id1 id2 ...)
+                          (match current-state
+                            [(struct state (destructure ...))
+                             (increment-pc (begin body1 ...))])]
+                         [else #f]))
+                     operations))
+         ;; Recursion...
+         (define-whitespace-operations (destructure ...)
+           [(id3 id4 ...)
+            body2 ...] ...))]
+    [(_ (destructure ...))
+     #'(void)]))
+
+;; Filled in by macros: a list of functions mapping to Whitespace operations
+;; that take an s-expression. If they match, the operation is invoked.
+(define operations '())
+
+;; interp-program :: [Instruction] -> Value
+;;
+;; Executes the program, which is a list of whitespace instructions. When
+;; the program terminates, evaluates to the top value in the value stack.
+(define (interp-program program)
+  (let* ([final-state (call/cc
+                       (λ (k)
+                         (let ([current-state (make-state program '() '() '() 0 k)])
+                           (run current-state))))]
+         [value-stack (state-value-stack final-state)])
+    (if (empty? value-stack)
+        'finished
+        (car value-stack))))
+
+;; run :: State -> State
+;;
+;; Executes the next command from current-state, and returns a final state upon the
+;; program's termination. The two terminating conditions are: a program counter
+;; exceeds the number of instructions, or an explicit (end) command, handled by the
+;; continuation set in interp-program.
+(define (run current-state)
+  (let* ([pc (state-program-counter current-state)]
+         [prog (state-program current-state)])
+    (cond
+      [(< pc (length prog))
+       (let ([new-state (run-instruction current-state (list-ref prog pc))])
+         (run new-state))]
+      [else
+       ((state-escape current-state) current-state)])))
+
+;; print-state :: State -> ()
+;;
+;; Mostly for debugging: prints the components of a state.
+(define (print-state a-state)
+  (match a-state
+    ([struct state (prog vs cs mem pc k)]
+     (printf "------STATE~nprog = ~v~nvs = ~v~ncs = ~v~nmem = ~v~npc = ~v~n------~n" prog vs cs mem pc))))
+
+
+;; run-instruction :: State * Instruction -> State
+;;
+;; Finds the appropriate operation from the macro-ed definitions, performs it.
+(define (run-instruction current-state instr)
+  (let ([result (ormap (λ (k) (k current-state instr)) operations)])
+    (if result
+        result
+        (begin
+          (printf "Error! No matching clause for command ~v~n" instr)
+          (printf "Ending program...~n")
+          ((state-escape current-state) 'failure)))))
 
 
 ;
@@ -53,104 +127,126 @@
 ;            ;
 
 
-(define-whitespace-operation (push i)
-  (prog vstack cstack mem pc)
-  (state prog (cons i vstack) cstack mem pc))
+(define-whitespace-operations
+  ;; The Whitespace VM contains
+  ;;   * A program to run.
+  ;;   * A value stack to operate on.
+  ;;   * A call stack for subroutines.
+  ;;   * A Memory Store for heap storage.
+  ;;   * A Program Counter to navigate the program.
+  ;;   * An escape continuation, to end at any moment.
+  (prog vstack cstack mem pc k)
 
-(define-whitespace-operation (dup)
-  (prog vstack cstack mem pc)
-  (state prog (cons (car vstack) vstack) cstack mem pc))
+  [(push i)
+   ;; Pushes the number to the top of the value stack.
+   (make-state prog (cons i vstack) cstack mem pc k)]
 
-(define-whitespace-operation (ref i)
-  (prog vstack cstack mem pc)
-  (state prog (cons (list-ref vstack i) vstack) cstack mem pc))
+  [(dup)
+   ;; Duplicates the value on the top of the value stack.
+   (make-state prog (cons (car vstack) vstack) cstack mem pc k)]
 
-(define-whitespace-operation (slide i)
-  (prog (list fst rst ...) cstack mem pc)
-  (state prog (cons fst (drop rst i)) cstack mem pc))
+  [(ref i)
+   ;; Refer to a value i entries down the value stack.
+   (make-state prog (cons (list-ref vstack i) vstack) cstack mem pc k)]
 
-(define-whitespace-operation (swap)
-  (prog (list fst snd rst ...) cstack mem pc)
-  (state prog `(,snd ,fst . ,rst) cstack mem pc))
+  [(slide i)
+   ;; "Slide" off i values from the vstack, preserving the top.
+   (match vstack
+     [(list fst rst ...)
+      (make-state prog (cons fst (drop rst i)) cstack mem pc k)])]
 
-(define-whitespace-operation (discard)
-  (prog vstack cstack mem pc)
-  (state prog (cdr vstack) cstack mem pc))
+  [(swap)
+   ;; Swaps the first and second value in the value stack.
+   (make-state prog (cons (cadr vstack) (cons (car vstack) (cddr vstack))) cstack mem pc k)]
 
-(define-whitespace-operation (infix op)
-  (prog (list right left rst ...) cstack mem pc)
-  (let* ([val (match
-                  op
-                ['plus (+ left right)]
-                ['minus (- left right)]
-                ['times (* left right)]
-                ['divide (quotient left right)]
-                ['modulo (modulo left right)])])
-    (state prog (cons val rst) cstack mem pc)))
+  [(discard)
+   ;; Discards the top value in the value stack.
+   (make-state prog (cdr vstack) cstack mem pc k)]
 
-(define-whitespace-operation (read-char)
-  (prog (list loc rst ...) cstack mem pc)
-  (let ([datum (char->integer (car (string->list (symbol->string (read)))))])
-    (state prog rst cstack (store-in-heap mem datum loc) pc)))
+  [(infix op)
+   ;; Performs 'op' on the two top values of the value stack.
+   (match vstack
+     [(list right left rst ...)
+      (let* ([val (match
+                      op
+                    ['plus (+ left right)]
+                    ['minus (- left right)]
+                    ['times (* left right)]
+                    ['divide (quotient left right)]
+                    ['modulo (modulo left right)])])
+        (make-state prog (cons val rst) cstack mem pc k))])]
 
-(define-whitespace-operation (output-char)
-  (prog (list fst rst ...) cstack mem pc)
-  (printf "~a" (integer->char fst))
-  (state prog rst cstack mem pc))
+  [(read-char)
+   ;; Reads a char from the current input port, stores it in the heap store.
+   (match vstack
+     [(list loc rst ...)
+      (let ([datum (char->integer (car (string->list (symbol->string (read)))))])
+        (make-state prog rst cstack (store-in-heap mem datum loc) pc k))])]
 
-(define-whitespace-operation (read-int)
-  (prog (list loc rst ...) cstack mem pc)
-  (let ([datum (read)])
-    (state prog rst cstack (store-in-heap mem datum loc) pc)))
+  [(output-char)
+   ;; Outputs the top value of the value stack, as a char.
+   (printf "~a" (integer->char (car vstack)))
+   (make-state prog (cdr vstack) cstack mem pc k)]
 
-(define-whitespace-operation (output-int)
-  (prog (list fst rst ...) cstack mem pc)
-  (printf "~a" fst)
-  (state prog rst cstack mem pc))
+  [(read-int)
+   ;; Read an int, and store it in the heap store in the address at the top of the value stack.
+   (let ([datum (read)])
+     (make-state prog (cdr vstack) cstack (store-in-heap mem datum (car vstack)) pc k))]
 
-(define-whitespace-operation (label l)
-  (prog vstack cstack mem pc)
-  (state prog vstack cstack mem pc)) ;; don't manipulate the stack, just increment pc
+  [(output-int)
+   ;; Outputs the top value of the value stack, as an int.
+   (printf "~a" (car vstack))
+   (make-state prog (cdr vstack) cstack mem pc k)]
 
-(define-whitespace-operation (call l)
-  (prog vstack cstack mem pc)
-  (begin
-    (printf "from CALL, label is ~a~n" l)
-    (let ([index (find-label prog l)])
-      (state prog vstack (cons pc cstack) mem index))))
+  [(label l)
+   ;; Create a label in the program, for reference by 'call' or 'if'
+   (make-state prog vstack cstack mem pc k)]
 
-(define-whitespace-operation (jump l)
-  (prog vstack cstack mem pc)
-  (let ([index (find-label prog l)])
-    (state prog vstack cstack mem index)))
+  [(call l)
+   ;; Execute code located after label 'l', then return to current position.
+   (let ([index (find-label prog l)])
+     (make-state prog vstack (cons pc cstack) mem index k))]
 
-(define-whitespace-operation (ws-if t l)
-  (prog (list fst rst ...) cstack mem pc)
-  (if (or (and (eq? t 'zero) (= fst 0))
-          (and (eq? t 'negative) (< fst 0)))
-      (let ([index (find-label prog l)])
-        (state prog rst cstack mem index))
-      (state prog rst cstack mem pc)))
+  [(jump l)
+   ;; Jump to the code located after label 'l'
+   (let ([index (find-label prog l)])
+     (make-state prog vstack cstack mem index k))]
 
-(define-whitespace-operation (return)
-  (prog vstack (list fst rst ...) mem pc)
-  (state prog vstack rst mem fst))
+  [(if t l)
+   ;; Checks whether the top value in the stack matches the condition. 'if'
+   ;; has two forms:
+   ;;   * (if zero label) -> true if top value in value stack == 0
+   ;;   * (if negative label) -> true if top value in value stack < 0
+   ;;
+   ;; In the case of true, go to label. false, we continue.
+   (let ([fst (car vstack)]
+         [rst (cdr vstack)])
+     (if (or (and (eq? t 'zero) (= fst 0))
+             (and (eq? t 'negative) (< fst 0)))
+         (let ([index (find-label prog l)])
+           (make-state prog rst cstack mem index k))
+         (make-state prog rst cstack mem pc k)))]
 
-;; using an escape continuation, but one we globally set before
-;; running the interpreter. ewwwww.....
-(define global-escape! #f)
-(define (end a-state)
-  (global-escape! a-state))
+  [(return)
+   ;; Returns to the top value in the call stack, often from the 'call' instruction.
+   (make-state prog vstack (cdr cstack) mem (car cstack) k)]
 
-(define-whitespace-operation (store)
-  (prog (list value loc rst ...) cstack heap pc)
-  (let ([new-heap (store-in-heap heap value loc)])
-    (state prog rst cstack new-heap pc)))
+  [(end)
+   ;; Ends the program being interpreted.
+   (k (make-state prog vstack cstack mem cstack k))]
 
-(define-whitespace-operation (retrieve)
-  (prog (list value rst ...) cstack heap pc)
-  (let ([value (retrieve-from-heap heap value)])
-    (state prog (cons value rst) cstack heap pc)))
+  [(store)
+   ;; Stores the value at the top of the value stack in the heap store,
+   ;; at the location specified by the second value in the value stack.
+   (let ([new-heap (store-in-heap mem (car vstack) (cadr vstack))])
+     (make-state prog (cddr vstack) cstack new-heap pc k))]
+
+  [(retrieve)
+   ;; Retrieves the value in the heap store, denoted at the location at
+   ;; the top of the value stack.
+  (let ([value (retrieve-from-heap mem (car vstack))])
+    (make-state prog (cons value (cdr vstack)) cstack mem pc k))])
+
 
 ;
 ;
@@ -171,6 +267,37 @@
 ;                              ;
 ;                              ;
 
+;; increment-pc :: State -> State
+;;
+;; Increments the program counter on the current state.
+(define (increment-pc current-state)
+  (match current-state
+    [(state prog vs cs mem pc k)
+     (make-state prog vs cs mem (add1 pc) k)]))
+
+;; store-in-heap :: Heap * Datum * Integer -> Heap
+;;
+;; Returns a new heap with the data stored in the appropriate location.
+(define (store-in-heap a-heap datum loc)
+  (cond
+    [(empty? a-heap)
+     (cond
+       [(= 0 loc) (cons datum '())]
+       [else (cons 0 (store-in-heap a-heap datum (sub1 loc)))])]
+    [else
+     (cond
+       [(= 0 loc) (cons datum (cdr a-heap))]
+       [else (cons (car a-heap) (store-in-heap (cdr a-heap) datum (sub1 loc)))])]))
+
+;; retrieve-from-heap :: Heap * Integer -> Value
+;;
+;; Retrieves a value from the heap at a certain offset.
+(define (retrieve-from-heap a-heap loc)
+  (list-ref a-heap loc))
+
+;; find-label :: Program * Label -> Integer
+;;
+;; Given a program and a label, will find the '(label LABEL) offset in the program.
 (define (find-label a-program label)
   (letrec ([recur (λ (prog accum)
                     (cond
@@ -179,19 +306,10 @@
                             (eq? 'label (caar prog))
                             (eq? label (cadar prog)))
                        accum]
-                      [(and (list? (car prog))
-                            (eq? 'label (caar prog)))
-                       (printf "label command looks like ~a~n" (car prog))
-                       (printf "comparing ~a with ~a~n" (cadar prog) label)
-                       'not-found]
                       [else (recur (cdr prog) (add1 accum))]))])
     (recur a-program 0)))
 
 
-
-
-(define (retrieve-from-heap a-heap loc)
-  (list-ref a-heap loc))
 
 ;
 ;
@@ -212,59 +330,6 @@
 ;
 ;
 
-(define-namespace-anchor end-of-defs)
-
-;; Takes a list of commands, and executes them
-;; one by one, using the input of the last as the
-;; input to the next. When the program counter > length of
-;; the program, the program evaluates to the top of the value stack.
-;;
-;; Sample input would be '((push 14) (push 11) (push 45) (discard) (infix plus)) and would
-;; evaluate to 25.
-(define (interp-program list-of-commands)
-  (let ([get-fun-from-instr (λ (name) (match name          ;; This function is stupid as hell, but
-                                        ['push push]       ;; I'd rather just run this shit than spend
-                                        ['dup dup]         ;; more time reading why I can't just eval this
-                                        ['ref ref]         ;; without fungling around with syntax objects
-                                        ['slide slide]     ;; and the like. Vim shows that power != intuitive,
-                                        ['swap swap]       ;; but Christ, Racket's facilities have a deep learning curve.
-                                        ['discard discard]
-                                        ['infix infix]
-                                        ['read-char read-char]
-                                        ['output-char output-char]
-                                        ['read-int read-int]
-                                        ['output-int output-int]
-                                        ['label label]
-                                        ['call call]
-                                        ['jump jump]
-                                        ['return return]
-                                        ['store store]
-                                        ['retrieve retrieve]
-                                        ['ws-if ws-if]
-                                        ['end end]))])
-    (letrec ([do-instr (λ (a-state)
-                         (let* ([instr (match a-state
-                                         [(state prog vstack _ _ pc)
-                                          (list-ref prog pc)])]
-                                [fun (get-fun-from-instr (car instr))]
-                                [args (append (cdr instr) (list a-state))]
-                                [total-instr (append instr (list a-state))])
-;                           (apply fun args)))])
-                           (printf "instr is ~a~n" total-instr)
-                           (eval (append instr (list a-state)) (namespace-anchor->namespace end-of-defs))))])
-      (let ([final-state (call/cc (λ (k)
-                                    (set! global-escape! k)
-                                    (let ([starting (new-state-with-program list-of-commands)])
-                                      (letrec ([recur (λ (new-state)
-                                                        (if (>= (state-program-counter new-state)
-                                                               (length (state-program new-state)))
-                                                            new-state
-                                                            (recur (do-instr new-state))))])
-                                        (recur starting)))))])
-        (let ([vstate (state-value-stack final-state)])
-          (if (empty? vstate)
-              '()
-              (car vstate)))))))
 
 (define (math-check msg prog num)
   (check-equal? (interp-program prog) num msg))
@@ -277,26 +342,26 @@
    (push 11)             ;;            (11 14)
    (push 45)             ;;            (45 11 14)
    (discard)             ;;            (11 14)
-   (infix 'plus)) 25)     ;;            (25)
+   (infix plus)) 25)     ;;            (25)
 
 (math-check
  "dup, swap, minus"      ;; vstack -> '()
  '((push 11)             ;;            (11)
    (dup)                 ;;            (11 11)
-   (infix 'times)         ;;            (121)
+   (infix times)         ;;            (121)
    (push 221)            ;;            (221 121)
    (swap)                ;;            (121 221)
-   (infix 'minus)) 100)   ;;            (100)
+   (infix minus)) 100)   ;;            (100)
 
 (math-check
  "ref, divide"
  '((push 10)
    (ref 0)
-   (infix 'divide)   ;; should be '(1)
+   (infix divide)   ;; should be '(1)
    (push 7)
    (push 5)
-   (infix 'divide)   ;; should be '(1 1)
-   (infix 'plus)) 2)
+   (infix divide)   ;; should be '(1 1)
+   (infix plus)) 2)
 
 (math-check
  "ref, modulo"
@@ -307,7 +372,7 @@
    (push 5)        ;; (5 7 9 3 4)
    (ref 2)         ;; (9 5 7 9 3 4)
    (ref 2)         ;; should be '(7 9 5 7 9 3 4)
-   (infix 'modulo)) 2)
+   (infix modulo)) 2)
 
 (math-check
  "slide (simple)"
@@ -316,7 +381,7 @@
    (push 10)
    (push 1)
    (slide 2)
-   (infix 'plus)) 15)
+   (infix plus)) 15)
 
 (math-check
  "slide (twice)"
@@ -330,82 +395,82 @@
    (push 1)
    (push 15)
    (slide 3)
-   (infix 'plus)
+   (infix plus)
    (slide 3)
-   (infix 'plus)) 35)
+   (infix plus)) 35)
 
 ;; Control functions. - label, call, jump, if, return, implicit/explicit end.
 
 (math-check
  "control functions, no if."
  '((push 15)             ;; vstack -> '(15)
-   (call 'push-25)       ;;            (25 15)
-   (call 'push-10)       ;;            (10 25 15)
-   (infix 'plus)         ;;            (35 15)
-   (infix 'plus)         ;;            (50)
+   (call push-25)        ;;            (25 15)
+   (call push-10)        ;;            (10 25 15)
+   (infix plus)          ;;            (35 15)
+   (infix plus)          ;;            (50)
    (end)                 ;;            *end program -> 50*
-   (label 'push-25)      ;;
+   (label push-25)       ;;
    (push 11)             ;;            (11 ...)
    (push 14)             ;;            (14 11 ...)
-   (infix 'plus)         ;;            (25 ...)
+   (infix plus)          ;;            (25 ...)
    (return)              ;;
-   (label 'sub-7)        ;;            Never called, included to ensure its presence doesn't disturb other labels.
+   (label sub-7)         ;;            Never called, included to ensure its presence doesn't disturb other labels.
    (push 7)              ;;            (7 ...)
-   (infix 'minus)        ;;            Not being able to write this value is where stack languages get their POWAAAAAA
+   (infix minus)         ;;            Not being able to write this value is where stack languages get their POWAAAAAA
    (end)                 ;;
-   (label 'push-10)      ;;
+   (label push-10)       ;;
    (push 15)             ;;            (15 ...)
    (push 5)              ;;            (5 15 ...)
-   (infix 'minus)        ;;            (10 ...)
+   (infix minus)         ;;            (10 ...)
    (return)) 50)
 
 (math-check
  "control functions, with if"
  '((push 10)
    (push 10)
-   (infix 'minus)
-   (ws-if 'zero 'output-15)
+   (infix minus)
+   (if zero output-15)
    (push 1)
-   (jump 'end-if)
-   (label 'output-15)
+   (jump end-if)
+   (label output-15)
    (push 15)
-   (label 'end-if)
+   (label end-if)
    (end)) 15)
 
 (math-check
  "control functions, with if (testing else case)"
  '((push 10)
    (push 5)
-   (infix 'minus)
-   (ws-if 'zero 'output-15)
+   (infix minus)
+   (if zero output-15)
    (push 1)
-   (jump 'end-if)
-   (label 'output-15)
+   (jump end-if)
+   (label output-15)
    (push 15)
-   (label 'end-if)
+   (label end-if)
    (end)) 1)
 
 (math-check
  "control functions with neg rather than 0"
  '((push 10)
    (push 11)
-   (infix 'minus)
-   (ws-if 'negative 'push-30)
+   (infix minus)
+   (if negative push-30)
    (push 1)
-   (jump 'after-if)
-   (label 'push-30)
+   (jump after-if)
+   (label push-30)
    (push 30)
-   (label 'after-if)
+   (label after-if)
    (push 20)
    (push 19)
-   (infix 'minus)
-   (ws-if 'negative 'push-1)
+   (infix minus)
+   (if negative push-1)
    (push 30)
-   (jump 'sum-it)
-   (label 'push-1)
+   (jump sum-it)
+   (label push-1)
    (push 1)
-   (label 'sum-it)
-   (infix 'plus)) 60)
+   (label sum-it)
+   (infix plus)) 60)
 
 ;; Heap - store and retrieve
 (math-check
@@ -415,10 +480,10 @@
    (store)
    (push 11)
    (dup)
-   (infix 'plus)
+   (infix plus)
    (push 0)
    (retrieve)
-   (infix 'plus)
+   (infix plus)
    (push 1)
    (swap)
    (store)
@@ -426,7 +491,7 @@
    (retrieve)
    (push 1)
    (retrieve)
-   (infix 'plus)) 422)
+   (infix plus)) 422)
 
 (math-check
  "storage and retrieval, with some out-of-bounds storage values"
@@ -436,10 +501,10 @@
    (push 14)
    (push 8)
    (retrieve)
-   (infix 'plus) ;; should be 14 + 0
+   (infix plus) ;; should be 14 + 0
    (push 10)
    (retrieve)
-   (infix 'plus)) 214)
+   (infix plus)) 214)
 
 ;; output-char
 (define (check-output prog expected msg)
@@ -497,7 +562,7 @@
    (read-int)
    (push 0)
    (retrieve)
-   (infix 'plus))
+   (infix plus))
  "14"
  25
  "Read int")
@@ -508,7 +573,7 @@
    (read-char)
    (push 0)
    (retrieve)
-   (infix 'plus))
+   (infix plus))
  "o"                           ;; 'o' is 111
  218
  "Read char")

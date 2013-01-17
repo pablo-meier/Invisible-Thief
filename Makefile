@@ -7,3 +7,5 @@ bin:
 
 clean:
 	rm -f $(BIN_NAME)
+	rm -rf compiled
+	sed -i "s/[ \t]*$$//" *.rkt

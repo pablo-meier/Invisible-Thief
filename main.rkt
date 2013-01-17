@@ -1,6 +1,6 @@
 #lang racket
 
-(require "semantics2.rkt"
+(require "semantics.rkt"
          "parser.rkt")
 
 (define (main)
