@@ -10,8 +10,6 @@
 ;; clean up interp-program to use eval.
 ;; Profile?
 
-(define namespace (current-namespace))
-
 (define-struct state (program value-stack call-stack memory program-counter))
 
 (define (new-state)
@@ -116,8 +114,10 @@
 
 (define-whitespace-operation (call l)
   (prog vstack cstack mem pc)
-  (let ([index (find-label prog l)])
-    (state prog vstack (cons pc cstack) mem index)))
+  (begin
+    (printf "from CALL, label is ~a~n" l)
+    (let ([index (find-label prog l)])
+      (state prog vstack (cons pc cstack) mem index))))
 
 (define-whitespace-operation (jump l)
   (prog vstack cstack mem pc)
@@ -172,27 +172,23 @@
 ;                              ;
 
 (define (find-label a-program label)
-  (letrec ([recur (λ (prog lbl accum)
+  (letrec ([recur (λ (prog accum)
                     (cond
                       [(empty? prog) 'not-found]
                       [(and (list? (car prog))
                             (eq? 'label (caar prog))
-                            (eq? lbl (cadar prog)))
+                            (eq? label (cadar prog)))
                        accum]
-                      [else (recur (cdr prog) lbl (add1 accum))]))])
-    (recur a-program label 0)))
+                      [(and (list? (car prog))
+                            (eq? 'label (caar prog)))
+                       (printf "label command looks like ~a~n" (car prog))
+                       (printf "comparing ~a with ~a~n" (cadar prog) label)
+                       'not-found]
+                      [else (recur (cdr prog) (add1 accum))]))])
+    (recur a-program 0)))
 
 
-(define (store-in-heap a-heap datum loc)
-  (cond
-    [(empty? a-heap)
-     (cond
-       [(= 0 loc) (cons datum '())]
-       [else (cons 0 (store-in-heap a-heap datum (sub1 loc)))])]
-    [else
-     (cond
-       [(= 0 loc) (cons datum (cdr a-heap))]
-       [else (cons (car a-heap) (store-in-heap (cdr a-heap) datum (sub1 loc)))])]))
+
 
 (define (retrieve-from-heap a-heap loc)
   (list-ref a-heap loc))
@@ -215,6 +211,8 @@
 ;
 ;
 ;
+
+(define-namespace-anchor end-of-defs)
 
 ;; Takes a list of commands, and executes them
 ;; one by one, using the input of the last as the
@@ -249,8 +247,11 @@
                                          [(state prog vstack _ _ pc)
                                           (list-ref prog pc)])]
                                 [fun (get-fun-from-instr (car instr))]
-                                [args (append (cdr instr) (list a-state))])
-                           (apply fun args)))])
+                                [args (append (cdr instr) (list a-state))]
+                                [total-instr (append instr (list a-state))])
+;                           (apply fun args)))])
+                           (printf "instr is ~a~n" total-instr)
+                           (eval (append instr (list a-state)) (namespace-anchor->namespace end-of-defs))))])
       (let ([final-state (call/cc (λ (k)
                                     (set! global-escape! k)
                                     (let ([starting (new-state-with-program list-of-commands)])
@@ -276,26 +277,26 @@
    (push 11)             ;;            (11 14)
    (push 45)             ;;            (45 11 14)
    (discard)             ;;            (11 14)
-   (infix plus)) 25)     ;;            (25)
+   (infix 'plus)) 25)     ;;            (25)
 
 (math-check
  "dup, swap, minus"      ;; vstack -> '()
  '((push 11)             ;;            (11)
    (dup)                 ;;            (11 11)
-   (infix times)         ;;            (121)
+   (infix 'times)         ;;            (121)
    (push 221)            ;;            (221 121)
    (swap)                ;;            (121 221)
-   (infix minus)) 100)   ;;            (100)
+   (infix 'minus)) 100)   ;;            (100)
 
 (math-check
  "ref, divide"
  '((push 10)
    (ref 0)
-   (infix divide)   ;; should be '(1)
+   (infix 'divide)   ;; should be '(1)
    (push 7)
    (push 5)
-   (infix divide)   ;; should be '(1 1)
-   (infix plus)) 2)
+   (infix 'divide)   ;; should be '(1 1)
+   (infix 'plus)) 2)
 
 (math-check
  "ref, modulo"
@@ -306,7 +307,7 @@
    (push 5)        ;; (5 7 9 3 4)
    (ref 2)         ;; (9 5 7 9 3 4)
    (ref 2)         ;; should be '(7 9 5 7 9 3 4)
-   (infix modulo)) 2)
+   (infix 'modulo)) 2)
 
 (math-check
  "slide (simple)"
@@ -315,7 +316,7 @@
    (push 10)
    (push 1)
    (slide 2)
-   (infix plus)) 15)
+   (infix 'plus)) 15)
 
 (math-check
  "slide (twice)"
@@ -329,82 +330,82 @@
    (push 1)
    (push 15)
    (slide 3)
-   (infix plus)
+   (infix 'plus)
    (slide 3)
-   (infix plus)) 35)
+   (infix 'plus)) 35)
 
 ;; Control functions. - label, call, jump, if, return, implicit/explicit end.
 
 (math-check
  "control functions, no if."
- '((push 15)            ;; vstack -> '(15)
-   (call push-25)       ;;            (25 15)
-   (call push-10)       ;;            (10 25 15)
-   (infix plus)         ;;            (35 15)
-   (infix plus)         ;;            (50)
-   (end)                ;;            *end program -> 50*
-   (label push-25)      ;;
-   (push 11)            ;;            (11 ...)
-   (push 14)            ;;            (14 11 ...)
-   (infix plus)         ;;            (25 ...)
-   (return)             ;;
-   (label sub-7)        ;;            Never called, included to ensure its presence doesn't disturb other labels.
-   (push 7)             ;;            (7 ...)
-   (infix minus)        ;;            Not being able to write this value is where stack languages get their POWAAAAAA
-   (end)                ;;
-   (label push-10)      ;;
-   (push 15)            ;;            (15 ...)
-   (push 5)             ;;            (5 15 ...)
-   (infix minus)        ;;            (10 ...)
+ '((push 15)             ;; vstack -> '(15)
+   (call 'push-25)       ;;            (25 15)
+   (call 'push-10)       ;;            (10 25 15)
+   (infix 'plus)         ;;            (35 15)
+   (infix 'plus)         ;;            (50)
+   (end)                 ;;            *end program -> 50*
+   (label 'push-25)      ;;
+   (push 11)             ;;            (11 ...)
+   (push 14)             ;;            (14 11 ...)
+   (infix 'plus)         ;;            (25 ...)
+   (return)              ;;
+   (label 'sub-7)        ;;            Never called, included to ensure its presence doesn't disturb other labels.
+   (push 7)              ;;            (7 ...)
+   (infix 'minus)        ;;            Not being able to write this value is where stack languages get their POWAAAAAA
+   (end)                 ;;
+   (label 'push-10)      ;;
+   (push 15)             ;;            (15 ...)
+   (push 5)              ;;            (5 15 ...)
+   (infix 'minus)        ;;            (10 ...)
    (return)) 50)
 
 (math-check
  "control functions, with if"
  '((push 10)
    (push 10)
-   (infix minus)
-   (ws-if zero output-15)
+   (infix 'minus)
+   (ws-if 'zero 'output-15)
    (push 1)
-   (jump end-if)
-   (label output-15)
+   (jump 'end-if)
+   (label 'output-15)
    (push 15)
-   (label end-if)
+   (label 'end-if)
    (end)) 15)
 
 (math-check
  "control functions, with if (testing else case)"
  '((push 10)
    (push 5)
-   (infix minus)
-   (ws-if zero output-15)
+   (infix 'minus)
+   (ws-if 'zero 'output-15)
    (push 1)
-   (jump end-if)
-   (label output-15)
+   (jump 'end-if)
+   (label 'output-15)
    (push 15)
-   (label end-if)
+   (label 'end-if)
    (end)) 1)
 
 (math-check
  "control functions with neg rather than 0"
  '((push 10)
    (push 11)
-   (infix minus)
-   (ws-if negative push-30)
+   (infix 'minus)
+   (ws-if 'negative 'push-30)
    (push 1)
-   (jump after-if)
-   (label push-30)
+   (jump 'after-if)
+   (label 'push-30)
    (push 30)
-   (label after-if)
+   (label 'after-if)
    (push 20)
    (push 19)
-   (infix minus)
-   (ws-if negative push-1)
+   (infix 'minus)
+   (ws-if 'negative 'push-1)
    (push 30)
-   (jump sum-it)
-   (label push-1)
+   (jump 'sum-it)
+   (label 'push-1)
    (push 1)
-   (label sum-it)
-   (infix plus)) 60)
+   (label 'sum-it)
+   (infix 'plus)) 60)
 
 ;; Heap - store and retrieve
 (math-check
@@ -414,10 +415,10 @@
    (store)
    (push 11)
    (dup)
-   (infix plus)
+   (infix 'plus)
    (push 0)
    (retrieve)
-   (infix plus)
+   (infix 'plus)
    (push 1)
    (swap)
    (store)
@@ -425,7 +426,7 @@
    (retrieve)
    (push 1)
    (retrieve)
-   (infix plus)) 422)
+   (infix 'plus)) 422)
 
 (math-check
  "storage and retrieval, with some out-of-bounds storage values"
@@ -435,10 +436,10 @@
    (push 14)
    (push 8)
    (retrieve)
-   (infix plus) ;; should be 14 + 0
+   (infix 'plus) ;; should be 14 + 0
    (push 10)
    (retrieve)
-   (infix plus)) 214)
+   (infix 'plus)) 214)
 
 ;; output-char
 (define (check-output prog expected msg)
@@ -496,7 +497,7 @@
    (read-int)
    (push 0)
    (retrieve)
-   (infix plus))
+   (infix 'plus))
  "14"
  25
  "Read int")
@@ -507,7 +508,7 @@
    (read-char)
    (push 0)
    (retrieve)
-   (infix plus))
+   (infix 'plus))
  "o"                           ;; 'o' is 111
  218
  "Read char")

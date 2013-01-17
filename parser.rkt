@@ -147,8 +147,8 @@
   (AA '(label LABEL))
   (AB '(call LABEL))
   (AC '(jump LABEL))
-  (BA '(ws-if zero LABEL))
-  (BB '(ws-if negative LABEL))
+  (BA '(if zero LABEL))
+  (BB '(if negative LABEL))
   (BC '(return))
   (CC '(end)))
 
@@ -352,7 +352,7 @@
 (parse-test
  "ws-if negative test"
  (C B B A A B C)
- '((ws-if negative |001|)))
+ '((if negative |001|)))
 
 (parse-test
  "end test"
